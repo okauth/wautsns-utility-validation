@@ -40,6 +40,7 @@ import com.github.wautsns.utility.validation.core.criterion.handlers.Stringifier
 import com.github.wautsns.utility.validation.core.criterion.handlers.ValueHandlers;
 import com.github.wautsns.utility.validation.core.criterion.handlers.ValueHandlers4Marker;
 import com.github.wautsns.utility.validation.core.validation.VEnv;
+import com.github.wautsns.utility.validation.core.validation.VGroups;
 import com.github.wautsns.utility.validation.exception.initialization.InitializationException;
 
 import lombok.AccessLevel;
@@ -57,7 +58,11 @@ public class Criterion {
 
 	private Class<?> type;
 	private String position;
+
+	private Class<?> root;
+	private String indepth;
 	private Class<?>[] groups;
+
 	private Converter converter;
 	private Predicate predicate;
 	private Stringifier stringifier;
@@ -68,6 +73,16 @@ public class Criterion {
 		if (predicate.test(value)) return null;
 		String temp = (stringifier == null) ? Stringifier.simple(value) : stringifier.stringify(value);
 		return predicate.test(value) ? null : template.generate(position, temp);
+	}
+
+	@Override
+	public String toString() {
+		StringBuilder bder = new StringBuilder();
+		Arrays.stream(groups).forEach(group -> bder.append(group.getSimpleName()).append(", "));
+		if (bder.length() != 0)
+			bder.delete(bder.length() - 2, bder.length());
+		return String.format("{type = %s, root = %s, position = %s, indepth = %s, groups = %s}",
+			type.getSimpleName(), root.getSimpleName(), position, indepth, bder);
 	}
 
 	public static class Attributes {
@@ -102,7 +117,9 @@ public class Criterion {
 							groups.add(curr);
 				}
 			}
-			attrs.data.put("groups", groups.toArray(new Class<?>[groups.size()]));
+			attrs.data.put("groups", groups.isEmpty()
+				? VGroups.DEFAULT_GROUPS
+				: groups.toArray(new Class<?>[groups.size()]));
 		}
 
 		private static void _checkAndAdjustIndepth(Attributes attrs) {
@@ -289,12 +306,12 @@ public class Criterion {
 				md.path = new LinkedList<>();
 				if (!md.isMarker()) {
 					specifies.stream()
-						.filter(s -> s.order() <= 0)
-						.forEach(s -> _addSpecifiedAttrs(md, s, chain));
+						.filter(specify -> specify.order() <= 0)
+						.forEach(specify -> _addSpecifiedAttrs(md, specify, chain));
 					md.path.add(md.attrs);
 					specifies.stream()
-						.filter(s -> s.order() > 0)
-						.forEach(s -> _addSpecifiedAttrs(md, s, chain));
+						.filter(specify -> specify.order() > 0)
+						.forEach(specify -> _addSpecifiedAttrs(md, specify, chain));
 				} else if (specifies.size() == 0) {
 					throw new InitializationException("标记约束需要至少关联指定其他一个约束才有意义");
 				} else {
@@ -430,8 +447,8 @@ public class Criterion {
 
 		public static LinkedList<Criterion> analyze(
 				String position, ResolvableType resolvableType, Annotation[] annotations) {
-			if (annotations.length == 0) return null;
 			LinkedList<Criterion> criteria = new LinkedList<>();
+			if (annotations.length == 0) return criteria;
 			for (Annotation annotation : annotations)
 				criteria.addAll(_analyze(position, resolvableType, annotation));
 			if (!criteria.isEmpty()) _optimize(criteria);
@@ -442,7 +459,20 @@ public class Criterion {
 				String position, ResolvableType resolvableType, Annotation annotation) {
 			LinkedList<Criterion> criteria = new LinkedList<>();
 			MetaData root = MetaData.of(annotation.annotationType());
-			if (root == null) return criteria;
+			if (root == null) {
+				Class<? extends Annotation> annoType = annotation.annotationType();
+				try {
+					Method attr = annoType.getDeclaredMethod("value");
+					Class<?> attrType = attr.getReturnType();
+					if (!attrType.isArray() || !attrType.getComponentType().isAnnotation())
+						return criteria;
+					attr.setAccessible(true);
+					Annotation[] annotations = (Annotation[]) attr.invoke(annotation);
+					return analyze(position, resolvableType, annotations);
+				} catch (Exception e) {
+					return criteria;
+				}
+			}
 			Criterion rootCriterion = _newCriterion(null, position, root.attrs, annotation, resolvableType);
 			for (MetaData.MetaAttrs node : root.path)
 				criteria.add(_newCriterion(rootCriterion, position, node, annotation, resolvableType));
@@ -462,17 +492,19 @@ public class Criterion {
 			if (rootCriterion != null && rootCriterion.type == metaAttrs.owner)
 				return rootCriterion;
 			Criterion criterion = new Criterion();
+			criterion.root = (rootCriterion == null) ? metaAttrs.owner : rootCriterion.type;
 			criterion.type = metaAttrs.owner;
 			criterion.position = position;
 			Attributes attrs = Attributes.of(metaAttrs, annotation);
 			criterion.groups = attrs.get("groups");
+			criterion.indepth = attrs.get("indepth");
 			criterion.template = (rootCriterion != null && metaAttrs.get("message").owner == rootCriterion.type)
 				? rootCriterion.template : CriterionViolation.Template.of(attrs.data);
 			MetaData md = MetaData.of(metaAttrs.owner);
 			if (md.isMarker()) return criterion;
 			try {
 				ValueHandlers<?> vhs = md.config.valueHandlers().newInstance();
-				criterion.converter = vhs.getConverter(_getIndepthType(attrs, resolvableType));
+				criterion.converter = vhs.getConverter(_getIndepthType(criterion.indepth, resolvableType));
 				criterion.predicate = vhs.getPredicate(attrs);
 				criterion.stringifier = vhs.getStringifier(attrs);
 				return criterion;
@@ -481,17 +513,16 @@ public class Criterion {
 			}
 		}
 
-		private static ResolvableType _getIndepthType(Attributes attrs, ResolvableType resolvableType) {
+		private static ResolvableType _getIndepthType(String indepth, ResolvableType resolvableType) {
 			ResolvableType temp = resolvableType;
-			String indepth = attrs.get("indepth");
 			for (int i = 0; i < indepth.length(); i++) {
 				char op = indepth.charAt(i);
 				if (op == 'e')
-					temp = temp.asCollection().getNested(2);
+					temp = temp.asCollection().getGeneric(0);
 				else if (op == 'k')
-					temp = temp.asMap().getNested(2);
+					temp = temp.asMap().getGeneric(0);
 				else if (op == 'v')
-					temp = temp.asMap().getNested(3);
+					temp = temp.asMap().getGeneric(1);
 				else if (op == 'c')
 					temp = temp.getComponentType();
 				if (temp == ResolvableType.NONE)
