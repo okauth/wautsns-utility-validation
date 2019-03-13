@@ -45,7 +45,7 @@ public @interface VBetween {
 
 	Class<?>[] groups() default {};
 
-	String indepth() default "";
+	String depth() default "";
 
 	long min();
 

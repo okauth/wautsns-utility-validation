@@ -46,7 +46,7 @@ public @interface VPositive {
 
 	Class<?>[] groups() default {};
 
-	String indepth() default "";
+	String depth() default "";
 
 	long max() default Long.MAX_VALUE;
 

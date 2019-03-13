@@ -60,7 +60,7 @@ public class Criterion {
 	private String position;
 
 	private Class<?> root;
-	private String indepth;
+	private String depth;
 	private Class<?>[] groups;
 
 	private Converter converter;
@@ -81,8 +81,8 @@ public class Criterion {
 		Arrays.stream(groups).forEach(group -> bder.append(group.getSimpleName()).append(", "));
 		if (bder.length() != 0)
 			bder.delete(bder.length() - 2, bder.length());
-		return String.format("{type = %s, root = %s, position = %s, indepth = %s, groups = %s}",
-			type.getSimpleName(), root.getSimpleName(), position, indepth, bder);
+		return String.format("{type = %s, root = %s, position = %s, depth = %s, groups = %s}",
+			type.getSimpleName(), root.getSimpleName(), position, depth, bder);
 	}
 
 	public static class Attributes {
@@ -93,12 +93,13 @@ public class Criterion {
 			return (T) data.get(name);
 		}
 
+		// 注意此时的 depth, 为相对深度(除 root 属性外)
 		private static Attributes of(MetaData.MetaAttrs metaAttrs, Annotation annotation) {
 			Attributes attrs = new Attributes();
 			attrs.data = new HashMap<>(metaAttrs.size(), 1f);
 			metaAttrs.forEach((name, attr) -> attrs.data.put(name, attr.getValue(annotation)));
 			_adjustGroups(attrs);
-			_checkAndAdjustIndepth(attrs);
+			_checkAndAdjustDepth(metaAttrs, attrs);
 			return attrs;
 		}
 
@@ -122,12 +123,17 @@ public class Criterion {
 				: groups.toArray(new Class<?>[groups.size()]));
 		}
 
-		private static void _checkAndAdjustIndepth(Attributes attrs) {
-			String indepth = attrs.get("indepth");
-			indepth = indepth.toLowerCase();
-			if (!indepth.matches("[ekvc]*"))
-				throw new InitializationException("indepth 表达式只能由 ekvc 组成");
-			attrs.data.put("indepth", indepth);
+		private static void _checkAndAdjustDepth(MetaData.MetaAttrs metaAttrs, Attributes attrs) {
+			MetaData.MetaAttr metaAttrDepth = metaAttrs.get("depth");
+			if (metaAttrDepth.owner != metaAttrs.owner && !metaAttrDepth.isConst())
+				attrs.data.put("depth", "");
+			else {
+				String relativeDepth = attrs.get("depth");
+				relativeDepth = relativeDepth.toLowerCase();
+				if (!relativeDepth.matches("[ekvc]*"))
+					throw new InitializationException("depth 表达式只能由 ekvc 组成");
+				attrs.data.put("depth", relativeDepth);
+			}
 		}
 	}
 
@@ -282,9 +288,9 @@ public class Criterion {
 					Arrays.stream(specifies)
 						.filter(specify -> md.type == specify.type())
 						.forEach(specify -> _specifySelfAttrs(md, specify));
-				if (Arrays.asList("message", "groups", "indepth").stream().allMatch(md.attrs::containsKey))
+				if (Arrays.asList("message", "groups", "depth").stream().allMatch(md.attrs::containsKey))
 					return md;
-				throw new InitializationException("缺少对必要属性[message,groups,indepth]的定义");
+				throw new InitializationException("缺少对必要属性[message,groups,depth]的定义");
 			}
 
 			private static void _specifySelfAttrs(MetaData md, ASpecify specify) {
@@ -307,19 +313,19 @@ public class Criterion {
 				if (!md.isMarker()) {
 					specifies.stream()
 						.filter(specify -> specify.order() <= 0)
-						.forEach(specify -> _addSpecifiedAttrs(md, specify, chain));
+						.forEach(specify -> _addSpecifiedNonRootAttrs(md, specify, chain));
 					md.path.add(md.attrs);
 					specifies.stream()
 						.filter(specify -> specify.order() > 0)
-						.forEach(specify -> _addSpecifiedAttrs(md, specify, chain));
+						.forEach(specify -> _addSpecifiedNonRootAttrs(md, specify, chain));
 				} else if (specifies.size() == 0) {
 					throw new InitializationException("标记约束需要至少关联指定其他一个约束才有意义");
 				} else {
-					specifies.forEach(specify -> _addSpecifiedAttrs(md, specify, chain));
+					specifies.forEach(specify -> _addSpecifiedNonRootAttrs(md, specify, chain));
 				}
 			}
 
-			private static void _addSpecifiedAttrs(MetaData md, ASpecify specify, List<Class<?>> chain) {
+			private static void _addSpecifiedNonRootAttrs(MetaData md, ASpecify specify, List<Class<?>> chain) {
 				MetaData ref = getInstance(specify.type(), chain);
 				if (ref == null)
 					throw new InitializationException("注解[%s]并不是一个约束注解", specify.type());
@@ -340,7 +346,7 @@ public class Criterion {
 						attrs.put(nmv[0], _analysisSpelNMV(md.type, nmv, refAttr.getType()));
 					}
 				}
-				for (String name : new String[] { "message", "groups", "indepth" })
+				for (String name : new String[] { "message", "groups", "depth" })
 					attrs.putIfAbsent(name, md.attrs.get(name));
 				for (Entry<String, MetaAttr> entry : ref.attrs.entrySet())
 					if (!attrs.containsKey(entry.getKey()))
@@ -377,7 +383,7 @@ public class Criterion {
 				try {
 					Expression expr = new SpelExpressionParser().parseExpression(nmv[2]);
 					if (type == null) {
-						if ("message".equals(nmv[0]) || "indepth".equals(nmv[0]))
+						if ("message".equals(nmv[0]) || "depth".equals(nmv[0]))
 							type = String.class;
 						else if ("groups".equals(nmv[0]))
 							type = Class[].class;
@@ -479,9 +485,16 @@ public class Criterion {
 			return criteria;
 		}
 
+		// TODO 优化 criteria
 		private static void _optimize(LinkedList<Criterion> criteria) {
-			Class<?>[] groups = criteria.getFirst().groups;
-			// TODO 优化 criteria
+			// 由于优化是在某个固定位置进行,所以能保证 position 相同
+			criteria.sort((c1, c2) -> {
+				if (c1.root == c2.root)
+					return 0;
+				if (c1.depth.length() == c2.depth.length())
+					return c1.depth.compareTo(c2.depth);
+				return c1.depth.length() < c2.depth.length() ? -1 : 1;
+			});
 		}
 
 		private static Criterion _newCriterion(
@@ -496,15 +509,16 @@ public class Criterion {
 			criterion.type = metaAttrs.owner;
 			criterion.position = position;
 			Attributes attrs = Attributes.of(metaAttrs, annotation);
+			if (rootCriterion != null) attrs.data.put("depth", rootCriterion.depth + attrs.get("depth"));
 			criterion.groups = attrs.get("groups");
-			criterion.indepth = attrs.get("indepth");
+			criterion.depth = attrs.get("depth");
 			criterion.template = (rootCriterion != null && metaAttrs.get("message").owner == rootCriterion.type)
 				? rootCriterion.template : CriterionViolation.Template.of(attrs.data);
 			MetaData md = MetaData.of(metaAttrs.owner);
 			if (md.isMarker()) return criterion;
 			try {
 				ValueHandlers<?> vhs = md.config.valueHandlers().newInstance();
-				criterion.converter = vhs.getConverter(_getIndepthType(criterion.indepth, resolvableType));
+				criterion.converter = vhs.getConverter(_getDepthType(criterion.depth, resolvableType));
 				criterion.predicate = vhs.getPredicate(attrs);
 				criterion.stringifier = vhs.getStringifier(attrs);
 				return criterion;
@@ -513,10 +527,10 @@ public class Criterion {
 			}
 		}
 
-		private static ResolvableType _getIndepthType(String indepth, ResolvableType resolvableType) {
+		private static ResolvableType _getDepthType(String depth, ResolvableType resolvableType) {
 			ResolvableType temp = resolvableType;
-			for (int i = 0; i < indepth.length(); i++) {
-				char op = indepth.charAt(i);
+			for (int i = 0; i < depth.length(); i++) {
+				char op = depth.charAt(i);
 				if (op == 'e')
 					temp = temp.asCollection().getGeneric(0);
 				else if (op == 'k')
@@ -526,7 +540,7 @@ public class Criterion {
 				else if (op == 'c')
 					temp = temp.getComponentType();
 				if (temp == ResolvableType.NONE)
-					throw new InitializationException(" indepth 表达式 \"%s\" 不适用于类型 %s", indepth, resolvableType);
+					throw new InitializationException(" depth 表达式 \"%s\" 不适用于类型 %s", depth, resolvableType);
 			}
 			return temp;
 		}

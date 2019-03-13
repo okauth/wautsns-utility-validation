@@ -54,7 +54,7 @@ public @interface VBySpEL {
 
 	Class<?>[] groups() default {};
 
-	String indepth() default "";
+	String depth() default "";
 
 	String expr();
 

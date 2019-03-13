@@ -52,7 +52,7 @@ public @interface VNotNull {
 
 	Class<?>[] groups() default {};
 
-	String indepth() default "";
+	String depth() default "";
 
 	class VNotNullValueHandleres implements ValueHandlers<Object> {
 

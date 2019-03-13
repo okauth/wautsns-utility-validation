@@ -47,7 +47,7 @@ public @interface VMax {
 
 	Class<?>[] groups() default {};
 
-	String indepth() default "";
+	String depth() default "";
 
 	long value();
 
