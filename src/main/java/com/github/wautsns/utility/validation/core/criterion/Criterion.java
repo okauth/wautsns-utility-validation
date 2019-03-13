@@ -68,8 +68,8 @@ public class Criterion {
 	private Stringifier stringifier;
 	private CriterionViolation.Template template;
 
-	public CriterionViolation test(Object source) {
-		Object value = (converter == null) ? source : converter.convert(source);
+	public CriterionViolation test(Object target) {
+		Object value = (converter == null) ? target : converter.convert(target);
 		if (predicate.test(value)) return null;
 		String temp = (stringifier == null) ? Stringifier.simple(value) : stringifier.stringify(value);
 		return predicate.test(value) ? null : template.generate(position, temp);
@@ -81,8 +81,9 @@ public class Criterion {
 		Arrays.stream(groups).forEach(group -> bder.append(group.getSimpleName()).append(", "));
 		if (bder.length() != 0)
 			bder.delete(bder.length() - 2, bder.length());
-		return String.format("{type = %s, root = %s, position = %s, depth = %s, groups = %s}",
-			type.getSimpleName(), root.getSimpleName(), position, depth, bder);
+		return String.format("{type = %s, position = %s, root = %s, depth = %s, groups = %s}",
+			type.getSimpleName(), position,
+			root.getSimpleName(), Stringifier.simple(depth), Stringifier.simple(groups));
 	}
 
 	public static class Attributes {
@@ -93,13 +94,12 @@ public class Criterion {
 			return (T) data.get(name);
 		}
 
-		// 注意此时的 depth, 为相对深度(除 root 属性外)
-		private static Attributes of(MetaData.MetaAttrs metaAttrs, Annotation annotation) {
+		private static Attributes of(String rootDepth, MetaData.MetaAttrs mas, Annotation anno) {
 			Attributes attrs = new Attributes();
-			attrs.data = new HashMap<>(metaAttrs.size(), 1f);
-			metaAttrs.forEach((name, attr) -> attrs.data.put(name, attr.getValue(annotation)));
+			attrs.data = new HashMap<>(mas.size(), 1f);
+			mas.forEach((name, attr) -> attrs.data.put(name, attr.getValue(anno)));
 			_adjustGroups(attrs);
-			_checkAndAdjustDepth(metaAttrs, attrs);
+			_checkAndAdjustDepth(rootDepth, mas, attrs);
 			return attrs;
 		}
 
@@ -123,17 +123,13 @@ public class Criterion {
 				: groups.toArray(new Class<?>[groups.size()]));
 		}
 
-		private static void _checkAndAdjustDepth(MetaData.MetaAttrs metaAttrs, Attributes attrs) {
-			MetaData.MetaAttr metaAttrDepth = metaAttrs.get("depth");
-			if (metaAttrDepth.owner != metaAttrs.owner && !metaAttrDepth.isConst())
-				attrs.data.put("depth", "");
-			else {
-				String relativeDepth = attrs.get("depth");
-				relativeDepth = relativeDepth.toLowerCase();
-				if (!relativeDepth.matches("[ekvc]*"))
-					throw new InitializationException("depth 表达式只能由 ekvc 组成");
-				attrs.data.put("depth", relativeDepth);
-			}
+		private static void _checkAndAdjustDepth(String rootDepth, MetaData.MetaAttrs mas, Attributes attrs) {
+			String depth = attrs.get("depth");
+			depth = depth.toLowerCase();
+			if (!depth.matches("[ekvc]*"))
+				throw new InitializationException("depth 表达式只能由 ekvc 组成");
+			if (rootDepth != null) depth = rootDepth + depth;
+			attrs.data.put("depth", depth);
 		}
 	}
 
@@ -168,8 +164,8 @@ public class Criterion {
 			private Class<?> owner;
 			private Object _data;
 
-			public MetaAttr(Method method) {
-				this(method.getDeclaringClass(), method);
+			public MetaAttr(Method annoAttr) {
+				this(annoAttr.getDeclaringClass(), annoAttr);
 			}
 
 			public boolean isConst() {
@@ -366,8 +362,9 @@ public class Criterion {
 			}
 
 			private static MetaAttr _analysisRefNMV(Class<?> nmvOwner, String[] nmv, MetaAttr maRef) {
-				if (maRef != null) return maRef;
-				throw new InitializationException("约束属性[@%s.%s]引用了不存在的属性[%s]", nmvOwner, nmv[0], nmv[2]);
+				if (maRef == null)
+					throw new InitializationException("约束属性[@%s.%s]引用了不存在的属性[%s]", nmvOwner, nmv[0], nmv[2]);
+				return "depth".equals(nmv[0]) ? new MetaAttr(maRef.owner, "") : maRef;
 			}
 
 			private static MetaAttr _analysisUseDefaultValueNMV(Class<?> root, String[] nmv, MetaAttr target) {
@@ -502,17 +499,17 @@ public class Criterion {
 				String position,
 				MetaData.MetaAttrs metaAttrs, Annotation annotation,
 				ResolvableType resolvableType) {
-			if (rootCriterion != null && rootCriterion.type == metaAttrs.owner)
+			boolean isRoot = rootCriterion == null;
+			if (!isRoot && rootCriterion.type == metaAttrs.owner)
 				return rootCriterion;
 			Criterion criterion = new Criterion();
-			criterion.root = (rootCriterion == null) ? metaAttrs.owner : rootCriterion.type;
+			criterion.root = isRoot ? metaAttrs.owner : rootCriterion.type;
 			criterion.type = metaAttrs.owner;
 			criterion.position = position;
-			Attributes attrs = Attributes.of(metaAttrs, annotation);
-			if (rootCriterion != null) attrs.data.put("depth", rootCriterion.depth + attrs.get("depth"));
+			Attributes attrs = Attributes.of(isRoot ? null : rootCriterion.depth, metaAttrs, annotation);
 			criterion.groups = attrs.get("groups");
 			criterion.depth = attrs.get("depth");
-			criterion.template = (rootCriterion != null && metaAttrs.get("message").owner == rootCriterion.type)
+			criterion.template = (!isRoot && metaAttrs.get("message").owner == rootCriterion.type)
 				? rootCriterion.template : CriterionViolation.Template.of(attrs.data);
 			MetaData md = MetaData.of(metaAttrs.owner);
 			if (md.isMarker()) return criterion;
