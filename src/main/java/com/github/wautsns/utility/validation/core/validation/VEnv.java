@@ -30,18 +30,12 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class VEnv {
 
-	// >>>>>>>>>>>>>>> BEGIN SpEL env
-
 	/**
 	 * SpEL 上下文, 默认为 {@code new StandardEvaluationContext()}
 	 * 
 	 * <p> {@literal wautsns-utility-validation} 所有涉及到 SpEL 解析取值的地方, 均使用该上下文
 	 */
 	public static StandardEvaluationContext SpEL_CTX = new StandardEvaluationContext();
-
-	// =============== END SpEL env
-
-	// >>>>>>>>>>>>>>> BEGIN MessageSource
 
 	/**
 	 * 消息资源,默认为 {@code null}
@@ -61,7 +55,5 @@ public class VEnv {
 			? key
 			: MESSAGE_SOURCE.getMessage(key, null, key, LocaleContextHolder.getLocale());
 	}
-
-	// =============== END MessageSource
 
 }

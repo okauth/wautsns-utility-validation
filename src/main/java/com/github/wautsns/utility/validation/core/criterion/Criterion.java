@@ -67,11 +67,16 @@ public class Criterion {
 	private Stringifier stringifier;
 	private CriterionViolation.Template template;
 
+	public String getDepth() {
+		return attrs.depth;
+	}
+
 	public CriterionViolation test(Object target) {
 		Object value = (converter == null) ? target : converter.convert(target);
-		if (predicate.test(value)) return null;
-		String temp = (stringifier == null) ? Stringifier.simple(value) : stringifier.stringify(value);
-		return predicate.test(value) ? null : template.generate(position, temp);
+		return predicate.test(value)
+			? null
+			: template.generate(
+				(stringifier == null) ? Stringifier.simple(value) : stringifier.stringify(value));
 	}
 
 	@Override
@@ -80,7 +85,8 @@ public class Criterion {
 		bder.append("type = ").append(type.getSimpleName());
 		if (attrs.rootOwner != type)
 			bder.append(" (root owner: ").append(attrs.rootOwner.getSimpleName()).append(')');
-		bder.append('\n').append("position:depth = ").append(position).append(':').append(attrs.depth);
+		bder.append('\n').append("position = ").append(position)
+			.append(" (depth: ").append(Stringifier.simple(attrs.depth)).append(')');
 		bder.append('\n').append("groups = ").append(Stringifier.simple(attrs.groups));
 		bder.append('\n').append("data = {");
 		attrs.data.forEach((name, value) -> {
@@ -513,9 +519,6 @@ public class Criterion {
 		// TODO 优化 criteria
 		private static void _optimize(LinkedList<Criterion> criteria) {
 			// 由于优化是在某个固定位置进行,所以能保证 position 相同
-			criteria.sort((c1, c2) -> {
-				return 0;
-			});
 		}
 
 		private static Criterion _newCriterion(
@@ -528,11 +531,14 @@ public class Criterion {
 				return rootCriterion;
 			Criterion criterion = new Criterion();
 			criterion.type = metaAttrs.owner;
-			criterion.position = position;
 			criterion.attrs = Attributes._of(isRoot ? null : rootCriterion.attrs, metaAttrs, annotation);
+			criterion.position = position;
+			if (!criterion.attrs.depth.isEmpty())
+				criterion.position += '.' + criterion.attrs.depth;
 			String message = criterion.attrs._minimizeAndReturnMessage();
 			criterion.template = (!isRoot && metaAttrs.get("message").owner == rootCriterion.type)
-				? rootCriterion.template : CriterionViolation.Template.of(message, criterion.attrs.data);
+				? rootCriterion.template
+				: CriterionViolation.Template.of(criterion.position, criterion.type, message, criterion.attrs.data);
 			criterion.attrs.data.remove("message");
 			MetaData md = MetaData.of(metaAttrs.owner);
 			if (md.isMarker()) return criterion;

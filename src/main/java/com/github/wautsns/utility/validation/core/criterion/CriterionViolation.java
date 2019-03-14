@@ -36,24 +36,37 @@ import lombok.Getter;
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 public class CriterionViolation {
 
+	private Class<?> cause;
 	private String position;
 	private String message;
 
+	@Override
+	public String toString() {
+		return String.format("{cause: %s, position: %s, message: %s}", cause.getSimpleName(), position, message);
+	}
+
+	@AllArgsConstructor(access = AccessLevel.PROTECTED)
 	public static abstract class Template {
 
-		protected abstract String getTemplateMessage();
+		private String position;
+		private Class<?> cause;
 
-		public CriterionViolation generate(String position, String value) {
+		protected abstract String getMessageTemplate();
+
+		public CriterionViolation generate(String value) {
 			return new CriterionViolation(
+				cause,
 				position,
-				getTemplateMessage()
-					.replaceAll("\\{$p}", VEnv.tryGetI18nMessage(position))
-					.replaceAll("\\{$v}", value));
+				getMessageTemplate()
+					.replaceAll("\\{\\$p}", VEnv.tryGetI18nMessage(position))
+					.replaceAll("\\{\\$v}", value));
 		}
 
-		public static Template of(String message, HashMap<String, Object> data) {
+		public static Template of(String position, Class<?> cause, String message, HashMap<String, Object> data) {
 			boolean isSimple = VEnv.MESSAGE_SOURCE == null || !message.matches("\\{[^$#]*}");
-			return isSimple ? new SimpleTemplate(message, data) : new I18nTemplate(message, data);
+			return isSimple
+				? new SimpleTemplate(position, cause, message, data)
+				: new I18nTemplate(position, cause, message, data);
 		}
 
 		protected static String _fillData(String message, HashMap<String, Object> data) {
@@ -69,12 +82,13 @@ public class CriterionViolation {
 
 			private String message;
 
-			public SimpleTemplate(String message, HashMap<String, Object> data) {
-				message = _fillData(message, data);
+			public SimpleTemplate(String position, Class<?> cause, String message, HashMap<String, Object> data) {
+				super(position, cause);
+				this.message = _fillData(message, data);
 			}
 
 			@Override
-			protected String getTemplateMessage() {
+			protected String getMessageTemplate() {
 				return message;
 			}
 		}
@@ -84,7 +98,8 @@ public class CriterionViolation {
 			private String text;
 			private HashMap<String, Object> data;
 
-			public I18nTemplate(String message, HashMap<String, Object> data) {
+			public I18nTemplate(String position, Class<?> cause, String message, HashMap<String, Object> data) {
+				super(position, cause);
 				text = message;
 				this.data = data;
 			}
@@ -92,7 +107,7 @@ public class CriterionViolation {
 			private static final Pattern PATTERN = Pattern.compile("\\{(?![$#])([^{}]*)}");
 
 			@Override
-			protected String getTemplateMessage() {
+			protected String getMessageTemplate() {
 				String temp, message = VEnv.tryGetI18nMessage(text);
 				do {
 					temp = message;
