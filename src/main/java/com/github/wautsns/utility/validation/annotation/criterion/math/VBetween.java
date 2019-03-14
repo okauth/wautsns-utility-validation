@@ -47,6 +47,8 @@ public @interface VBetween {
 
 	String depth() default "";
 
+	int order() default 0;
+
 	long min();
 
 	long max();

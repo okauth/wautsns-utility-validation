@@ -32,6 +32,7 @@ import org.springframework.core.convert.converter.Converter;
 
 import com.github.wautsns.utility.validation.annotation.criterion.common.VNotNull.VNotNullValueHandleres;
 import com.github.wautsns.utility.validation.annotation.helper.ACriterion;
+import com.github.wautsns.utility.validation.annotation.helper.ASpecify;
 import com.github.wautsns.utility.validation.core.criterion.Criterion.Attributes;
 import com.github.wautsns.utility.validation.core.criterion.handlers.ValueHandlers;
 import com.github.wautsns.utility.validation.exception.initialization.UnsupportedConversionException;
@@ -46,6 +47,7 @@ import com.github.wautsns.utility.validation.exception.initialization.Unsupporte
 @Target({ FIELD, METHOD, PARAMETER })
 @Repeatable(VNotNullList.class)
 @ACriterion(valueHandlers = VNotNullValueHandleres.class)
+@ASpecify(type = VNotNull.class, attrs = "order=0")
 public @interface VNotNull {
 
 	String message() default "{v.not_null}";

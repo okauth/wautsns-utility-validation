@@ -48,6 +48,8 @@ public @interface VPositive {
 
 	String depth() default "";
 
+	int order() default 0;
+
 	long max() default Long.MAX_VALUE;
 
 }

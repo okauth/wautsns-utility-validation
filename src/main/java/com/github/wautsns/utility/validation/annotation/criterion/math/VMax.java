@@ -49,6 +49,8 @@ public @interface VMax {
 
 	String depth() default "";
 
+	int order() default 0;
+
 	long value();
 
 	class VMaxValueHandlers implements ValueHandlers4LongInteger {

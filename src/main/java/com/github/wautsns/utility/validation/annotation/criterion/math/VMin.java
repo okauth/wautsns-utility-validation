@@ -49,6 +49,8 @@ public @interface VMin {
 
 	String depth() default "";
 
+	int order() default 0;
+
 	long value();
 
 	class VMinValueHandlers implements ValueHandlers4LongInteger {

@@ -75,6 +75,10 @@ public class Criterion {
 		return attrs.groups;
 	}
 
+	public int getOrder() {
+		return attrs.order;
+	}
+
 	public CriterionViolation test(Object target) {
 		Object value = (converter == null) ? target : converter.convert(target);
 		return predicate.test(value)
@@ -92,6 +96,7 @@ public class Criterion {
 		bder.append('\n').append("position = ").append(position)
 			.append(" (depth: ").append(Stringifier.simple(attrs.depth)).append(')');
 		bder.append('\n').append("groups = ").append(Stringifier.simple(attrs.groups));
+		bder.append('\n').append("order = ").append(attrs.order);
 		bder.append('\n').append("data = {");
 		attrs.data.forEach((name, value) -> {
 			bder.append(name).append(": ").append(Stringifier.simple(value)).append(", ");
@@ -106,6 +111,7 @@ public class Criterion {
 		private Class<?> rootOwner;
 		private String depth;
 		private Class<?>[] groups;
+		private int order;
 		private HashMap<String, Object> data;
 
 		public <T> T get(String name) {
@@ -115,6 +121,7 @@ public class Criterion {
 		private static final HashMap<String, Object> _EMPTY = new HashMap<>(0);
 
 		private String _minimizeAndReturnMessage() {
+			order = (Integer) data.remove("order");
 			String message = (String) data.remove("message");
 			if (data.size() == 0)
 				data = _EMPTY;
@@ -317,9 +324,9 @@ public class Criterion {
 					Arrays.stream(specifies)
 						.filter(specify -> md.type == specify.type())
 						.forEach(specify -> _specifySelfAttrs(md, specify));
-				if (Arrays.asList("message", "groups", "depth").stream().allMatch(md.attrs::containsKey))
+				if (Arrays.asList("message", "groups", "depth", "order").stream().allMatch(md.attrs::containsKey))
 					return md;
-				throw new InitializationException("缺少对必要属性[message,groups,depth]的定义");
+				throw new InitializationException("缺少对必要属性[message,groups,depth,order]的定义");
 			}
 
 			private static void _specifySelfAttrs(MetaData md, ASpecify specify) {
@@ -378,6 +385,10 @@ public class Criterion {
 				for (String name : new String[] { "message", "groups" })
 					attrs.putIfAbsent(name, md.attrs.get(name));
 				attrs.putIfAbsent("depth", new MetaAttr(md.type, ""));
+				if (attrs.put("order", md.attrs.get("order")) != null)
+					throw new InitializationException(
+						"无法指定 @%s 的 order 属性, 若需要控制关联约束的执行顺序,请使用 @Specify.order() 来实现该功能",
+						specify.type());
 				for (Entry<String, MetaAttr> entry : ref.attrs.entrySet())
 					if (!attrs.containsKey(entry.getKey()))
 						throw new InitializationException("缺少约束属性[@%s.%s]的指定", specify.type(), entry.getKey());

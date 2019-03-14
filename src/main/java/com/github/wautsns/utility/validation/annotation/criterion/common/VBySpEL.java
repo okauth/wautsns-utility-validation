@@ -56,6 +56,8 @@ public @interface VBySpEL {
 
 	String depth() default "";
 
+	int order() default 0;
+
 	String expr();
 
 	String stringifier() default "";
