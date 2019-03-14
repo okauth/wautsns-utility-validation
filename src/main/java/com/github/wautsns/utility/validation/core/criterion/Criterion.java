@@ -35,7 +35,6 @@ import org.springframework.core.convert.converter.Converter;
 import org.springframework.expression.Expression;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 
-import com.github.wautsns.utility.validation.annotation.criterion.common.VNotNull;
 import com.github.wautsns.utility.validation.annotation.helper.ACriterion;
 import com.github.wautsns.utility.validation.annotation.helper.ASpecify;
 import com.github.wautsns.utility.validation.core.criterion.handlers.Stringifier;
@@ -61,9 +60,7 @@ public class Criterion {
 	private Class<?> type;
 	private String position;
 
-	private Class<?> root;
-	private String depth;
-	private Class<?>[] groups;
+	private Attributes attrs;
 
 	private Converter converter;
 	private Predicate predicate;
@@ -79,34 +76,59 @@ public class Criterion {
 
 	@Override
 	public String toString() {
-		StringBuilder bder = new StringBuilder();
-		Arrays.stream(groups).forEach(group -> bder.append(group.getSimpleName()).append(", "));
-		if (bder.length() != 0)
-			bder.delete(bder.length() - 2, bder.length());
-		return String.format("{type = %s, position = %s, root = %s, depth = %s, groups = %s}",
-			type.getSimpleName(), position,
-			root.getSimpleName(), Stringifier.simple(depth), Stringifier.simple(groups));
+		StringBuilder bder = new StringBuilder("\n");
+		bder.append("type = ").append(type.getSimpleName());
+		if (attrs.rootOwner != type)
+			bder.append(" (root owner: ").append(attrs.rootOwner.getSimpleName()).append(')');
+		bder.append('\n').append("position:depth = ").append(position).append(':').append(attrs.depth);
+		bder.append('\n').append("groups = ").append(Stringifier.simple(attrs.groups));
+		bder.append('\n').append("data = {");
+		attrs.data.forEach((name, value) -> {
+			bder.append(name).append(": ").append(Stringifier.simple(value)).append(", ");
+		});
+		if (attrs.data.size() != 0) bder.delete(bder.length() - 2, bder.length());
+		bder.append('}');
+		return bder.toString();
 	}
 
 	public static class Attributes {
 
+		private Class<?> rootOwner;
+		private String depth;
+		private Class<?>[] groups;
 		private HashMap<String, Object> data;
 
 		public <T> T get(String name) {
 			return (T) data.get(name);
 		}
 
-		private static Attributes of(String rootDepth, MetaData.MetaAttrs mas, Annotation anno) {
+		private static final HashMap<String, Object> _EMPTY = new HashMap<>(0);
+
+		private String _minimizeAndReturnMessage() {
+			String message = (String) data.remove("message");
+			if (data.size() == 0)
+				data = _EMPTY;
+			else {
+				HashMap<String, Object> temp = new HashMap<>(data.size(), 1f);
+				temp.putAll(data);
+				data = temp;
+			}
+			return message;
+		}
+
+		private static Attributes _of(Attributes rootAttrs, MetaData.MetaAttrs metaAttrs, Annotation anno) {
+			boolean isRoot = rootAttrs == null;
 			Attributes attrs = new Attributes();
-			attrs.data = new HashMap<>(mas.size(), 1f);
-			mas.forEach((name, attr) -> attrs.data.put(name, attr.getValue(anno)));
+			attrs.rootOwner = isRoot ? metaAttrs.owner : rootAttrs.rootOwner;
+			attrs.data = new HashMap<>(metaAttrs.size(), 1f);
+			metaAttrs.forEach((name, attr) -> attrs.data.put(name, attr.getValue(anno)));
 			_adjustGroups(attrs);
-			_checkAndAdjustDepth(rootDepth, mas, attrs);
+			_checkAndAdjustDepth(isRoot ? null : rootAttrs.depth, metaAttrs, attrs);
 			return attrs;
 		}
 
 		private static void _adjustGroups(Attributes attrs) {
-			LinkedList<Class<?>> groups = Arrays.stream((Class<?>[]) attrs.get("groups"))
+			LinkedList<Class<?>> groups = Arrays.stream((Class<?>[]) attrs.data.remove("groups"))
 				.distinct().collect(Collectors.toCollection(LinkedList::new));
 			for (int i = 0; i < groups.size();) {
 				Class<?> group = groups.get(i);
@@ -120,18 +142,17 @@ public class Criterion {
 							groups.add(curr);
 				}
 			}
-			attrs.data.put("groups", groups.isEmpty()
+			attrs.groups = groups.isEmpty()
 				? VGroups.DEFAULT_GROUPS
-				: groups.toArray(new Class<?>[groups.size()]));
+				: groups.toArray(new Class<?>[groups.size()]);
 		}
 
-		private static void _checkAndAdjustDepth(String rootDepth, MetaData.MetaAttrs mas, Attributes attrs) {
-			String depth = attrs.get("depth");
-			depth = depth.toLowerCase();
-			if (!depth.matches("[ekvc]*"))
+		private static void _checkAndAdjustDepth(String rootDepth, MetaData.MetaAttrs metaAttrs, Attributes attrs) {
+			attrs.depth = (String) attrs.data.remove("depth");
+			attrs.depth = attrs.depth.toLowerCase();
+			if (!attrs.depth.matches("[ekvc]*"))
 				throw new InitializationException("depth 表达式只能由 ekvc 组成");
-			if (rootDepth != null) depth = rootDepth + depth;
-			attrs.data.put("depth", depth);
+			if (rootDepth != null) attrs.depth = rootDepth + attrs.depth;
 		}
 	}
 
@@ -493,18 +514,8 @@ public class Criterion {
 		private static void _optimize(LinkedList<Criterion> criteria) {
 			// 由于优化是在某个固定位置进行,所以能保证 position 相同
 			criteria.sort((c1, c2) -> {
-				if (c1.root == c2.root) {
-					if (c1.type == VNotNull.class) {
-
-					}
-				}
 				return 0;
 			});
-		}
-
-		private static int _compareDepth(Criterion c1, Criterion c2) {
-			if (c1.depth.length() == c2.depth.length()) return 0;
-			return c1.depth.length() < c2.depth.length() ? -1 : 1;
 		}
 
 		private static Criterion _newCriterion(
@@ -516,21 +527,20 @@ public class Criterion {
 			if (!isRoot && rootCriterion.type == metaAttrs.owner)
 				return rootCriterion;
 			Criterion criterion = new Criterion();
-			criterion.root = isRoot ? metaAttrs.owner : rootCriterion.type;
 			criterion.type = metaAttrs.owner;
 			criterion.position = position;
-			Attributes attrs = Attributes.of(isRoot ? null : rootCriterion.depth, metaAttrs, annotation);
-			criterion.groups = attrs.get("groups");
-			criterion.depth = attrs.get("depth");
+			criterion.attrs = Attributes._of(isRoot ? null : rootCriterion.attrs, metaAttrs, annotation);
+			String message = criterion.attrs._minimizeAndReturnMessage();
 			criterion.template = (!isRoot && metaAttrs.get("message").owner == rootCriterion.type)
-				? rootCriterion.template : CriterionViolation.Template.of(attrs.data);
+				? rootCriterion.template : CriterionViolation.Template.of(message, criterion.attrs.data);
+			criterion.attrs.data.remove("message");
 			MetaData md = MetaData.of(metaAttrs.owner);
 			if (md.isMarker()) return criterion;
 			try {
 				ValueHandlers<?> vhs = md.config.valueHandlers().newInstance();
-				criterion.converter = vhs.getConverter(_getDepthType(criterion.depth, resolvableType));
-				criterion.predicate = vhs.getPredicate(attrs);
-				criterion.stringifier = vhs.getStringifier(attrs);
+				criterion.converter = vhs.getConverter(_getDepthType(criterion.attrs.depth, resolvableType));
+				criterion.predicate = vhs.getPredicate(criterion.attrs);
+				criterion.stringifier = vhs.getStringifier(criterion.attrs);
 				return criterion;
 			} catch (Exception e) {
 				throw new InitializationException(e, "初始化 ValueHandlers 失败,原因: %s", e.getMessage());

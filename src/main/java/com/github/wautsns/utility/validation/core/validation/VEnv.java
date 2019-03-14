@@ -53,13 +53,13 @@ public class VEnv {
 	/**
 	 * 尝试从 {@link #MESSAGE_SOURCE} 中获取指定文本所对应的 message
 	 * 
-	 * @param text 消息资源中的键文本
+	 * @param key 消息资源中的键
 	 * @return 存在则返回对应 message, 否则返回自身
 	 */
-	public static String tryGetMessage(String text) {
+	public static String tryGetI18nMessage(String key) {
 		return (MESSAGE_SOURCE == null)
-			? text
-			: MESSAGE_SOURCE.getMessage(text, null, text, LocaleContextHolder.getLocale());
+			? key
+			: MESSAGE_SOURCE.getMessage(key, null, key, LocaleContextHolder.getLocale());
 	}
 
 	// =============== END MessageSource

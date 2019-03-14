@@ -47,32 +47,30 @@ public class CriterionViolation {
 			return new CriterionViolation(
 				position,
 				getTemplateMessage()
-					.replaceAll("\\{$p}", VEnv.tryGetMessage(position))
+					.replaceAll("\\{$p}", VEnv.tryGetI18nMessage(position))
 					.replaceAll("\\{$v}", value));
 		}
 
-		public static Template of(HashMap<String, Object> data) {
-			String message = (String) data.get("message");
-			boolean isSimple = VEnv.MESSAGE_SOURCE == null || !message.matches("\\{.*}");
-			return isSimple ? new SimpleTemplate(data) : new I18nTemplate(data);
+		public static Template of(String message, HashMap<String, Object> data) {
+			boolean isSimple = VEnv.MESSAGE_SOURCE == null || !message.matches("\\{[^$#]*}");
+			return isSimple ? new SimpleTemplate(message, data) : new I18nTemplate(message, data);
 		}
 
 		protected static String _fillData(String message, HashMap<String, Object> data) {
+			// 需确保 data 已移除 message
 			for (Entry<String, Object> entry : data.entrySet()) {
-				if ("message".equals(entry.getKey()))
-					continue;
 				String value = Stringifier.simple(entry.getValue());
 				message = message.replaceAll("\\{\\#" + entry.getKey() + '}', value);
 			}
 			return message;
 		}
 
-		private static class SimpleTemplate extends Template {
+		public static class SimpleTemplate extends Template {
 
 			private String message;
 
-			public SimpleTemplate(HashMap<String, Object> data) {
-				message = _fillData((String) data.get("message"), data);
+			public SimpleTemplate(String message, HashMap<String, Object> data) {
+				message = _fillData(message, data);
 			}
 
 			@Override
@@ -81,27 +79,32 @@ public class CriterionViolation {
 			}
 		}
 
-		@AllArgsConstructor
-		private static class I18nTemplate extends Template {
+		public static class I18nTemplate extends Template {
 
-			private static final Pattern PATTERN = Pattern.compile("\\{([^}$#])}");
-
+			private String text;
 			private HashMap<String, Object> data;
+
+			public I18nTemplate(String message, HashMap<String, Object> data) {
+				text = message;
+				this.data = data;
+			}
+
+			private static final Pattern PATTERN = Pattern.compile("\\{(?![$#])([^{}]*)}");
 
 			@Override
 			protected String getTemplateMessage() {
-				String temp, template = (String) data.get("message");
+				String temp, message = VEnv.tryGetI18nMessage(text);
 				do {
-					temp = template;
+					temp = message;
 					Matcher matcher = PATTERN.matcher(temp);
 					while (matcher.find()) {
 						String target = matcher.group(1);
-						String replacement = VEnv.tryGetMessage(target);
+						String replacement = VEnv.tryGetI18nMessage(target);
 						if (target != replacement)
-							template = temp.replace("{" + target + '}', replacement);
+							message = temp.replace("{" + target + '}', replacement);
 					}
-				} while (!template.equals(temp));
-				return _fillData(template, data);
+				} while (!message.equals(temp));
+				return _fillData(message, data);
 			}
 		}
 	}
