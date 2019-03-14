@@ -279,7 +279,7 @@ public class Criterion {
 					_initDirectPath(instance, chain);
 					_replaceToCompletePath(instance, chain);
 				} catch (InitializationException e) {
-					throw new InitializationException(e, "\n\t\t初始化约束[%s]失败,原因: %s", type, e.getMessage());
+					throw new InitializationException(e, "初始化约束[%s]失败", type);
 				}
 				CACHE.put(type, instance);
 				return instance;
@@ -420,7 +420,7 @@ public class Criterion {
 						: expr.getValue(VEnv.SpEL_CTX, type);
 					return new MetaAttr(root, value);
 				} catch (RuntimeException e) {
-					throw new InitializationException("无法解析 SpEL 表达式: %s, 原因: %s", nmv[2], e.getMessage());
+					throw new InitializationException(e, "无法解析 SpEL 表达式: %s", nmv[2]);
 				}
 			}
 
@@ -482,9 +482,14 @@ public class Criterion {
 				String position, ResolvableType resolvableType, Annotation[] annotations) {
 			LinkedList<Criterion> criteria = new LinkedList<>();
 			if (annotations.length == 0) return criteria;
-			for (Annotation annotation : annotations)
-				criteria.addAll(_analyze(position, resolvableType, annotation));
-			if (!criteria.isEmpty()) _optimize(criteria);
+			for (Annotation annotation : annotations) {
+				try {
+					criteria.addAll(_analyze(position, resolvableType, annotation));
+				} catch (InitializationException e) {
+					throw new InitializationException(e, "初始化位于 %s 上的注解 %s 时出现错误",
+						position, annotation);
+				}
+			}
 			return criteria;
 		}
 
@@ -516,11 +521,6 @@ public class Criterion {
 			return criteria;
 		}
 
-		// TODO 优化 criteria
-		private static void _optimize(LinkedList<Criterion> criteria) {
-			// 由于优化是在某个固定位置进行,所以能保证 position 相同
-		}
-
 		private static Criterion _newCriterion(
 				Criterion rootCriterion,
 				String position,
@@ -549,7 +549,7 @@ public class Criterion {
 				criterion.stringifier = vhs.getStringifier(criterion.attrs);
 				return criterion;
 			} catch (Exception e) {
-				throw new InitializationException(e, "初始化 ValueHandlers 失败,原因: %s", e.getMessage());
+				throw new InitializationException(e, "初始化 ValueHandlers 失败");
 			}
 		}
 
