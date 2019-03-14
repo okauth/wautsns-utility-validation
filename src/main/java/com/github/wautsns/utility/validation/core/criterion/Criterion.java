@@ -263,16 +263,16 @@ public class Criterion {
 		}
 
 		public static MetaData of(Class<?> type) {
-			return InstanceHelper.getInstance(type, null);
+			return Instances.get(type, null);
 		}
 
-		private static class InstanceHelper {
+		private static class Instances {
 
-			private static final HashMap<Class<?>, MetaData> CACHE = new HashMap<>();
+			private static final HashMap<Class<?>, MetaData> INSTANCES = new HashMap<>();
 
-			public static MetaData getInstance(Class<?> type, List<Class<?>> chain) {
+			public static MetaData get(Class<?> type, List<Class<?>> chain) {
 				if (!type.isAnnotation()) return null;
-				MetaData instance = CACHE.get(type);
+				MetaData instance = INSTANCES.get(type);
 				if (instance != null) return instance;
 				ACriterion config = type.getDeclaredAnnotation(ACriterion.class);
 				if (config == null) return null;
@@ -285,7 +285,7 @@ public class Criterion {
 				} catch (InitializationException e) {
 					throw new InitializationException(e, "初始化约束[%s]失败", type);
 				}
-				CACHE.put(type, instance);
+				INSTANCES.put(type, instance);
 				return instance;
 			}
 
@@ -355,7 +355,7 @@ public class Criterion {
 			}
 
 			private static void _addSpecifiedNonRootAttrs(MetaData md, ASpecify specify, List<Class<?>> chain) {
-				MetaData ref = getInstance(specify.type(), chain);
+				MetaData ref = get(specify.type(), chain);
 				if (ref == null)
 					throw new InitializationException("注解[%s]并不是一个约束注解", specify.type());
 				MetaAttrs attrs = new MetaAttrs(specify.type(), specify.attrs().length);
@@ -434,7 +434,7 @@ public class Criterion {
 					if (ref.owner == md.type)
 						completePath.add(ref);
 					else
-						for (MetaAttrs pathNode : getInstance(ref.owner, chain).path)
+						for (MetaAttrs pathNode : get(ref.owner, chain).path)
 							if (pathNode.owner == ref.owner)
 								completePath.add(ref);
 							else {
