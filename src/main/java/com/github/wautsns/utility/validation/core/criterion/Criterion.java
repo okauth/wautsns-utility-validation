@@ -16,6 +16,7 @@
 package com.github.wautsns.utility.validation.core.criterion;
 
 import java.lang.annotation.Annotation;
+import java.lang.annotation.Repeatable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Arrays;
@@ -34,6 +35,7 @@ import org.springframework.core.convert.converter.Converter;
 import org.springframework.expression.Expression;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 
+import com.github.wautsns.utility.validation.annotation.criterion.common.VNotNull;
 import com.github.wautsns.utility.validation.annotation.helper.ACriterion;
 import com.github.wautsns.utility.validation.annotation.helper.ASpecify;
 import com.github.wautsns.utility.validation.core.criterion.handlers.Stringifier;
@@ -294,7 +296,7 @@ public class Criterion {
 					String[] nmv = _toNMV(attr);
 					if (!"=".equals(nmv[1]))
 						throw new InitializationException("只能通过 SpEL 表达式的方式指定自身属性,即: ${name}=${SpEL}");
-					MetaAttr old = md.attrs.put(nmv[0], _analysisSpelNMV(md.type, nmv, null));
+					MetaAttr old = md.attrs.put(nmv[0], _analyzeSpelNMV(md.type, nmv, null));
 					if (old != null)
 						throw new InitializationException("属性[%s]被多次定义", nmv[0]);
 				}
@@ -332,18 +334,19 @@ public class Criterion {
 					if (refAttr == null)
 						throw new InitializationException("指定了约束[%s]不存在的属性[%s]", specify, nmv[0]);
 					if (">".equals(nmv[1]))
-						attrs.put(nmv[0], _analysisRefNMV(specify.type(), nmv, md.attrs.get(nmv[2])));
+						attrs.put(nmv[0], _analyzeRefNMV(specify.type(), nmv, md.attrs.get(nmv[2])));
 					else if ("".equals(nmv[1]))
-						attrs.put(nmv[0], _analysisUseDefaultValueNMV(md.type, nmv, refAttr));
+						attrs.put(nmv[0], _analyzeUseDefaultValueNMV(md.type, nmv, refAttr));
 					else if ("=".equals(nmv[1])) {
 						if (refAttr.isConst())
 							throw new InitializationException("约束属性[@%s.%s]无法被指定,因为其已被指定为: %s",
 								specify.type(), nmv[0], refAttr);
-						attrs.put(nmv[0], _analysisSpelNMV(md.type, nmv, refAttr.getType()));
+						attrs.put(nmv[0], _analyzeSpelNMV(md.type, nmv, refAttr.getType()));
 					}
 				}
-				for (String name : new String[] { "message", "groups", "depth" })
+				for (String name : new String[] { "message", "groups" })
 					attrs.putIfAbsent(name, md.attrs.get(name));
+				attrs.putIfAbsent("depth", new MetaAttr(md.type, ""));
 				for (Entry<String, MetaAttr> entry : ref.attrs.entrySet())
 					if (!attrs.containsKey(entry.getKey()))
 						throw new InitializationException("缺少约束属性[@%s.%s]的指定", specify.type(), entry.getKey());
@@ -361,13 +364,13 @@ public class Criterion {
 				return nmv;
 			}
 
-			private static MetaAttr _analysisRefNMV(Class<?> nmvOwner, String[] nmv, MetaAttr maRef) {
+			private static MetaAttr _analyzeRefNMV(Class<?> nmvOwner, String[] nmv, MetaAttr maRef) {
 				if (maRef == null)
 					throw new InitializationException("约束属性[@%s.%s]引用了不存在的属性[%s]", nmvOwner, nmv[0], nmv[2]);
 				return "depth".equals(nmv[0]) ? new MetaAttr(maRef.owner, "") : maRef;
 			}
 
-			private static MetaAttr _analysisUseDefaultValueNMV(Class<?> root, String[] nmv, MetaAttr target) {
+			private static MetaAttr _analyzeUseDefaultValueNMV(Class<?> root, String[] nmv, MetaAttr target) {
 				if (target.isConst()) return target;
 				Object value = target.getValue();
 				if (value == null)
@@ -376,7 +379,7 @@ public class Criterion {
 				return new MetaAttr(root, value);
 			}
 
-			private static MetaAttr _analysisSpelNMV(Class<?> root, String[] nmv, Class<?> type) {
+			private static MetaAttr _analyzeSpelNMV(Class<?> root, String[] nmv, Class<?> type) {
 				try {
 					Expression expr = new SpelExpressionParser().parseExpression(nmv[2]);
 					if (type == null) {
@@ -464,17 +467,21 @@ public class Criterion {
 			MetaData root = MetaData.of(annotation.annotationType());
 			if (root == null) {
 				Class<? extends Annotation> annoType = annotation.annotationType();
+				Annotation[] annotations;
 				try {
 					Method attr = annoType.getDeclaredMethod("value");
 					Class<?> attrType = attr.getReturnType();
-					if (!attrType.isArray() || !attrType.getComponentType().isAnnotation())
-						return criteria;
+					if (!attrType.isArray()) return criteria;
+					Class<?> attrComponentType = attrType.getComponentType();
+					if (!attrComponentType.isAnnotation()) return criteria;
+					Repeatable repeatable = attrComponentType.getDeclaredAnnotation(Repeatable.class);
+					if (repeatable == null || repeatable.value() != annoType) return criteria;
 					attr.setAccessible(true);
-					Annotation[] annotations = (Annotation[]) attr.invoke(annotation);
-					return analyze(position, resolvableType, annotations);
+					annotations = (Annotation[]) attr.invoke(annotation);
 				} catch (Exception e) {
 					return criteria;
 				}
+				return analyze(position, resolvableType, annotations);
 			}
 			Criterion rootCriterion = _newCriterion(null, position, root.attrs, annotation, resolvableType);
 			for (MetaData.MetaAttrs node : root.path)
@@ -486,12 +493,18 @@ public class Criterion {
 		private static void _optimize(LinkedList<Criterion> criteria) {
 			// 由于优化是在某个固定位置进行,所以能保证 position 相同
 			criteria.sort((c1, c2) -> {
-				if (c1.root == c2.root)
-					return 0;
-				if (c1.depth.length() == c2.depth.length())
-					return c1.depth.compareTo(c2.depth);
-				return c1.depth.length() < c2.depth.length() ? -1 : 1;
+				if (c1.root == c2.root) {
+					if (c1.type == VNotNull.class) {
+
+					}
+				}
+				return 0;
 			});
+		}
+
+		private static int _compareDepth(Criterion c1, Criterion c2) {
+			if (c1.depth.length() == c2.depth.length()) return 0;
+			return c1.depth.length() < c2.depth.length() ? -1 : 1;
 		}
 
 		private static Criterion _newCriterion(
