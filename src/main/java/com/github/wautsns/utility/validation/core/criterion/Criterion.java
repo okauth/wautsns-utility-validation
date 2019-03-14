@@ -71,6 +71,10 @@ public class Criterion {
 		return attrs.depth;
 	}
 
+	public Class<?>[] getGroups() {
+		return attrs.groups;
+	}
+
 	public CriterionViolation test(Object target) {
 		Object value = (converter == null) ? target : converter.convert(target);
 		return predicate.test(value)
